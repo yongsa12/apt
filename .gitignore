@@ -1,0 +1,10 @@
+# Local environment variables containing private API Keys
+.env
+
+# Dependency directories
+node_modules/
+
+# Logs and system generated files
+*.log
+.gemini/
+.system_generated/
