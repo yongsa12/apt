@@ -5,6 +5,49 @@ function getApiKey() {
   return process.env.KEY || null;
 }
 
+// Function to translate English XML elements from Production API to Korean XML elements expected by the client
+function convertXmlToKorean(xmlData) {
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  
+  const converted = xmlData.replace(itemRegex, (match, itemContent) => {
+    const getVal = (tag) => {
+      const regex = new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`);
+      const m = itemContent.match(regex);
+      return m ? m[1].trim() : '';
+    };
+
+    const aptNm = getVal('aptNm');
+    const dealAmount = getVal('dealAmount');
+    const buildYear = getVal('buildYear');
+    const dealYear = getVal('dealYear');
+    const dealMonth = getVal('dealMonth').padStart(2, '0');
+    const dealDay = getVal('dealDay').padStart(2, '0');
+    const excluUseAr = getVal('excluUseAr');
+    const umdNm = getVal('umdNm');
+    const jibun = getVal('jibun');
+    const sggCd = getVal('sggCd');
+    const floor = getVal('floor');
+
+    return `
+    <item>
+      <거래금액>${dealAmount}</거래금액>
+      <건축년도>${buildYear}</건축년도>
+      <년>${dealYear}</년>
+      <월>${dealMonth}</월>
+      <일>${dealDay}</일>
+      <아파트>${aptNm}</아파트>
+      <전용면적>${excluUseAr}</전용면적>
+      <법정동> ${umdNm}</법정동>
+      <지번>${jibun}</지번>
+      <지역코드>${sggCd}</지역코드>
+      <층>${floor}</층>
+      <도로명></도로명>
+    </item>`;
+  });
+
+  return converted;
+}
+
 // Function to generate realistic mock data when external API fails or is unauthorized
 function generateMockXml(lawdCd, dealYmd) {
   const year = dealYmd.substring(0, 4);
@@ -135,7 +178,8 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const targetUrl = `http://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev?serviceKey=${apiKey}&LAWD_CD=${lawdCd}&DEAL_YMD=${dealYmd}&numOfRows=1000&pageNo=1`;
+  // Requesting the production API endpoint (without Dev suffix)
+  const targetUrl = `http://apis.data.go.kr/1613000/RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade?serviceKey=${apiKey}&LAWD_CD=${lawdCd}&DEAL_YMD=${dealYmd}&numOfRows=1000&pageNo=1`;
 
   try {
     const response = await fetch(targetUrl);
@@ -144,7 +188,8 @@ module.exports = async (req, res) => {
     }
     const xmlData = await response.text();
     
-    if (xmlData.includes('<resultCode>') && !xmlData.includes('<resultCode>00</resultCode>') && !xmlData.includes('<resultCode>0</resultCode>')) {
+    // Check for error return codes (Production API returns '000' on success, anything else is error)
+    if (xmlData.includes('<resultCode>') && !xmlData.includes('<resultCode>000</resultCode>') && !xmlData.includes('<resultCode>00</resultCode>') && !xmlData.includes('<resultCode>0</resultCode>')) {
       const errMatch = xmlData.match(/<resultMsg>([^<]+)/);
       const errMsg = errMatch ? errMatch[1] : 'Unknown Public Portal Error';
       throw new Error(`Public Portal Error: ${errMsg}`);
@@ -154,8 +199,11 @@ module.exports = async (req, res) => {
       throw new Error('No items found');
     }
 
+    // Translate English XML to Korean XML format for frontend
+    const translatedXml = convertXmlToKorean(xmlData);
+
     res.writeHead(200, { 'Content-Type': 'application/xml; charset=utf-8' });
-    res.end(xmlData);
+    res.end(translatedXml);
   } catch (error) {
     console.warn(`[Proxy Fallback] Serving mock data due to: ${error.message}`);
     const mockXml = generateMockXml(lawdCd, dealYmd);
